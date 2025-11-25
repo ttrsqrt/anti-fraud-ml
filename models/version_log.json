@@ -1,0 +1,38 @@
+{
+  "versions": [
+    {
+      "version": "v1.0.0",
+      "timestamp": "2025-11-25 21:42:30",
+      "model_path": "c:\\Users\\User\\Documents\\ttrsqr\\models\\catboost_model_v1.0.0.cbm",
+      "metrics": {
+        "roc_auc": 0.9665664044423877,
+        "precision": 0.1673469387755102,
+        "recall": 0.7068965517241379
+      },
+      "notes": "Automated retraining on 13140 samples"
+    },
+    {
+      "version": "v1.1.0",
+      "timestamp": "2025-11-25 21:43:09",
+      "model_path": "c:\\Users\\User\\Documents\\ttrsqr\\models\\catboost_model_v1.1.0.cbm",
+      "metrics": {
+        "roc_auc": 0.9665664044423877,
+        "precision": 0.1673469387755102,
+        "recall": 0.7068965517241379
+      },
+      "notes": "Automated retraining on 13140 samples"
+    },
+    {
+      "version": "v1.2.0",
+      "timestamp": "2025-11-25 21:47:46",
+      "model_path": "c:\\Users\\User\\Documents\\ttrsqr\\models\\catboost_model_v1.2.0.cbm",
+      "metrics": {
+        "roc_auc": 0.9665664044423877,
+        "precision": 0.1673469387755102,
+        "recall": 0.7068965517241379
+      },
+      "notes": "Automated retraining on 13140 samples"
+    }
+  ],
+  "current_version": "v1.2.0"
+}
