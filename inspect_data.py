@@ -1,9 +1,12 @@
 import pandas as pd
 import os
 
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 files = [
-    r"c:\Users\TTR4K\Desktop\hackathon\поведенческие паттерны клиентов.csv",
-    r"c:\Users\TTR4K\Desktop\hackathon\транзакции_в_Мобильном_интернет_Банкинге (1).csv"
+    os.path.join(SCRIPT_DIR, "поведенческие паттерны клиентов.csv"),
+    os.path.join(SCRIPT_DIR, "транзакции_в_Мобильном_интернет_Банкинге (1).csv")
 ]
 
 for f in files:

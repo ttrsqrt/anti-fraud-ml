@@ -1,11 +1,15 @@
 import pandas as pd
 import numpy as np
 import warnings
+import os
 
 warnings.filterwarnings('ignore')
 
-INPUT_FILE = r"c:\Users\User\Documents\ttrsqr\prepared_dataset.csv"
-OUTPUT_FILE = r"c:\Users\User\Documents\ttrsqr\featured_dataset.csv"
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+INPUT_FILE = os.path.join(SCRIPT_DIR, "prepared_dataset.csv")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "featured_dataset.csv")
 
 def load_data(filepath):
     print(f"Loading data from {filepath}...")

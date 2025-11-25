@@ -2,12 +2,16 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import warnings
+import os
 warnings.filterwarnings('ignore')
 
-# Пути к файлам
-BEHAVIORAL_FILE = r"c:\Users\TTR4K\Desktop\hackathon\поведенческие паттерны клиентов.csv"
-TRANSACTIONS_FILE = r"c:\Users\TTR4K\Desktop\hackathon\транзакции_в_Мобильном_интернет_Банкинге (1).csv"
-OUTPUT_FILE = r"c:\Users\TTR4K\Desktop\hackathon\prepared_dataset.csv"
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Пути к файлам (относительные)
+BEHAVIORAL_FILE = os.path.join(SCRIPT_DIR, "поведенческие паттерны клиентов.csv")
+TRANSACTIONS_FILE = os.path.join(SCRIPT_DIR, "транзакции_в_Мобильном_интернет_Банкинге (1).csv")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "prepared_dataset.csv")
 
 print("=" * 80)
 print("ЗАГРУЗКА ДАННЫХ")

@@ -10,8 +10,11 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Paths
-DATA_DIR = r"c:\Users\User\Documents\ttrsqr"
+DATA_DIR = SCRIPT_DIR
 MODELS_DIR = os.path.join(DATA_DIR, "models")
 FEATURED_DATASET = os.path.join(DATA_DIR, "featured_dataset.csv")
 PRODUCTION_MODEL = os.path.join(DATA_DIR, "catboost_model.cbm")

@@ -5,11 +5,15 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import roc_auc_score, average_precision_score, classification_report, f1_score
 import joblib
 import warnings
+import os
 
 warnings.filterwarnings('ignore')
 
-INPUT_FILE = r"c:\Users\User\Documents\ttrsqr\featured_dataset.csv"
-MODEL_FILE = r"c:\Users\User\Documents\ttrsqr\catboost_model.cbm"
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+INPUT_FILE = os.path.join(SCRIPT_DIR, "featured_dataset.csv")
+MODEL_FILE = os.path.join(SCRIPT_DIR, "catboost_model.cbm")
 
 def load_data(filepath):
     print(f"Loading data from {filepath}...")
@@ -145,7 +149,7 @@ def train_model(df):
     
     # Save detailed metrics to JSON
     import json
-    metrics_file = r"c:\Users\User\Documents\ttrsqr\model_metrics.json"
+    metrics_file = os.path.join(SCRIPT_DIR, "model_metrics.json")
     with open(metrics_file, 'w') as f:
         json.dump({
             'fold_metrics': all_metrics,
@@ -192,7 +196,7 @@ def main():
     print("TRAINING COMPLETED SUCCESSFULLY!")
     print("="*80)
     print(f"\nModel saved to: {MODEL_FILE}")
-    print(f"Metrics saved to: c:\\Users\\User\\Documents\\ttrsqr\\model_metrics.json")
+    print(f"Metrics saved to: {os.path.join(SCRIPT_DIR, 'model_metrics.json')}")
     print("\nDone!")
 
 if __name__ == "__main__":

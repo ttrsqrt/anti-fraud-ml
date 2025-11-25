@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 import json
+import os
 
 st.set_page_config(page_title="Fraud Detection System", layout="wide")
 
@@ -22,7 +23,9 @@ input_data = {}
 if input_method == "Load Sample from Dataset":
     # Load a sample from the featured dataset
     try:
-        df = pd.read_csv(r"c:\Users\User\Documents\ttrsqr\featured_dataset.csv")
+        # Получаем директорию текущего скрипта
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+        df = pd.read_csv(os.path.join(SCRIPT_DIR, "featured_dataset.csv"))
         # Pick a random row or let user select by ID
         sample_id = st.sidebar.number_input("Select Row Index", 0, len(df)-1, 0)
         row = df.iloc[sample_id]

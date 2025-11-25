@@ -4,10 +4,14 @@ import numpy as np
 from catboost import CatBoostClassifier, Pool
 import joblib
 import warnings
+import os
 
 warnings.filterwarnings('ignore')
 
-MODEL_FILE = r"c:\Users\User\Documents\ttrsqr\catboost_model.cbm"
+# Получаем директорию текущего скрипта
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_FILE = os.path.join(SCRIPT_DIR, "catboost_model.cbm")
 
 class FraudExplainer:
     def __init__(self, model_path=MODEL_FILE):
