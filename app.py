@@ -106,7 +106,7 @@ def predict_fraud(transaction: dict):
         # But if lengths differ, we truncate or pad? 
         # Better to just pass what we have and let generate_explanation handle or error with more info.
         
-        explanation = explainer.generate_explanation(df.iloc[0], sv, feature_names)
+        explanation = explainer.generate_explanation(df.iloc[0], sv, feature_names, is_fraud=bool(prediction))
         
         return {
             "fraud_probability": float(prob),

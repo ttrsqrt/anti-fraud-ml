@@ -44,7 +44,7 @@ class FraudExplainer:
         shap_values = self.explainer.shap_values(X)
         return shap_values
 
-    def generate_explanation(self, row_data, shap_values, feature_names):
+    def generate_explanation(self, row_data, shap_values, feature_names, is_fraud=True):
         # Generate a text explanation based on top SHAP features
         # row_data: pandas Series or dict of feature values
         # shap_values: numpy array of shap values for this row
@@ -62,7 +62,10 @@ class FraudExplainer:
         
         top_features = impact.head(3)
         
-        explanation = "Suspicious Activity Detected:\n"
+        if is_fraud:
+            explanation = "Suspicious Activity Detected:\n"
+        else:
+            explanation = "Legitimate Activity Detected:\n"
         reasons = []
         
         for _, row in top_features.iterrows():
@@ -81,7 +84,7 @@ class FraudExplainer:
         explanation += "\n".join(reasons)
         
         # Real LLM call (with fallback to mock if API unavailable)
-        llm_summary = self._llm_generate(reasons)
+        llm_summary = self._llm_generate(reasons, is_fraud)
         
         return {
             'text_explanation': explanation,
@@ -89,18 +92,26 @@ class FraudExplainer:
             'top_features': top_features.to_dict(orient='records')
         }
 
-    def _llm_generate(self, reasons):
+    def _llm_generate(self, reasons, is_fraud=True):
         """
         Generate natural language explanation using OpenAI API.
         Falls back to mock response if API is not available.
         """
         # Create a detailed prompt for the LLM - полностью на русском языке
-        prompt = f"""Проанализируйте следующие факторы, которые привели к пометке этой транзакции как потенциально мошеннической:
+        if is_fraud:
+            prompt = f"""Проанализируйте следующие факторы, которые привели к пометке этой транзакции как потенциально мошеннической:
 
 Факторы риска:
 {chr(10).join(reasons)}
 
-ВАЖНО: Ответьте ТОЛЬКО на русском языке. Объясните простыми словами для обычного пользователя, почему эта транзакция была помечена как подозрительная. Будьте конкретны и понятны."""
+ВАЖНО: Ответьте ТОЛЬКО на русском языке. Все что связано с деньгами указано в валюте тенге. Объясните простыми словами для обычного пользователя, почему эта транзакция была помечена как подозрительная. Будьте конкретны и понятны."""
+        else:
+            prompt = f"""Проанализируйте следующие факторы, которые подтверждают легитимность этой транзакции:
+
+Факторы:
+{chr(10).join(reasons)}
+
+ВАЖНО: Ответьте ТОЛЬКО на русском языке. Все что связано с деньгами указано в валюте тенге. Объясните простыми словами для обычного пользователя, почему эта транзакция считается безопасной. Будьте конкретны и понятны."""
 
         # Try to use OpenAI API if available
         if self.client:
@@ -110,7 +121,7 @@ class FraudExplainer:
                     messages=[
                         {
                             "role": "system", 
-                            "content": "Вы - эксперт по обнаружению мошенничества в финансовых транзакциях. ВСЕГДА отвечайте ТОЛЬКО на русском языке. Объясняйте решения модели простым и понятным языком. Никогда не используйте английский язык в ответах."
+                            "content": "Вы - эксперт по обнаружению мошенничества в финансовых транзакциях. ВСЕГДА отвечайте ТОЛЬКО на русском языке. Объясняйте решения модели простым и понятным языком. Никогда не используйте английский язык в ответах. Убедитесь, что ваш ответ является полным и законченным."
                         },
                         {
                             "role": "user", 
@@ -118,7 +129,7 @@ class FraudExplainer:
                         }
                     ],
                     temperature=0.7,
-                    max_tokens=300
+                    max_tokens=1000
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
@@ -126,7 +137,11 @@ class FraudExplainer:
                 print("Falling back to mock response...")
         
         # Fallback mock response if API is not available
-        return "Транзакция помечена как высокорисковая в первую очередь из-за необычной частоты переводов этому получателю и высокой суммы транзакции относительно истории пользователя."
+        # Fallback mock response if API is not available
+        if is_fraud:
+            return "Транзакция помечена как высокорисковая в первую очередь из-за необычной частоты переводов этому получателю и высокой суммы транзакции относительно истории пользователя."
+        else:
+            return "Транзакция выглядит безопасной. Сумма и получатель соответствуют вашим обычным паттернам активности."
 
 if __name__ == "__main__":
     # Test run
