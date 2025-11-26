@@ -5,11 +5,16 @@ from catboost import CatBoostClassifier, Pool
 import joblib
 import warnings
 import os
+from openai import OpenAI
+from dotenv import load_dotenv
 
 warnings.filterwarnings('ignore')
 
 # Получаем директорию текущего скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Загружаем переменные окружения из .env файла
+load_dotenv(os.path.join(SCRIPT_DIR, '.env'))
 
 MODEL_FILE = os.path.join(SCRIPT_DIR, "lgbm_model.pkl")
 
@@ -19,6 +24,20 @@ class FraudExplainer:
         # Load LightGBM model using joblib
         self.model = joblib.load(model_path)
         self.explainer = shap.TreeExplainer(self.model)
+        
+        # Initialize OpenAI client
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key or api_key == 'sk-your-actual-key-here':
+            print("WARNING: OpenAI API key not set. LLM explanations will use fallback mode.")
+            self.client = None
+        else:
+            try:
+                self.client = OpenAI(api_key=api_key)
+                print("OpenAI client initialized successfully.")
+            except Exception as e:
+                print(f"WARNING: Failed to initialize OpenAI client: {e}")
+                print("LLM explanations will use fallback mode.")
+                self.client = None
         
     def get_shap_values(self, X):
         # Calculate SHAP values for the given data
@@ -61,8 +80,8 @@ class FraudExplainer:
             
         explanation += "\n".join(reasons)
         
-        # Mock LLM call
-        llm_summary = self._mock_llm_generate(reasons)
+        # Real LLM call (with fallback to mock if API unavailable)
+        llm_summary = self._llm_generate(reasons)
         
         return {
             'text_explanation': explanation,
@@ -70,12 +89,44 @@ class FraudExplainer:
             'top_features': top_features.to_dict(orient='records')
         }
 
-    def _mock_llm_generate(self, reasons):
-        # In a real scenario, this would call OpenAI/Anthropic API
-        prompt = f"Explain why this transaction is fraudulent based on: {reasons}"
+    def _llm_generate(self, reasons):
+        """
+        Generate natural language explanation using OpenAI API.
+        Falls back to mock response if API is not available.
+        """
+        # Create a detailed prompt for the LLM - полностью на русском языке
+        prompt = f"""Проанализируйте следующие факторы, которые привели к пометке этой транзакции как потенциально мошеннической:
+
+Факторы риска:
+{chr(10).join(reasons)}
+
+ВАЖНО: Ответьте ТОЛЬКО на русском языке. Объясните простыми словами для обычного пользователя, почему эта транзакция была помечена как подозрительная. Будьте конкретны и понятны."""
+
+        # Try to use OpenAI API if available
+        if self.client:
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system", 
+                            "content": "Вы - эксперт по обнаружению мошенничества в финансовых транзакциях. ВСЕГДА отвечайте ТОЛЬКО на русском языке. Объясняйте решения модели простым и понятным языком. Никогда не используйте английский язык в ответах."
+                        },
+                        {
+                            "role": "user", 
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=300
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"Error calling OpenAI API: {e}")
+                print("Falling back to mock response...")
         
-        # Mock response
-        return "The transaction is flagged as high risk primarily due to unusual frequency of transfers to this recipient and a high transaction amount relative to the user's history."
+        # Fallback mock response if API is not available
+        return "Транзакция помечена как высокорисковая в первую очередь из-за необычной частоты переводов этому получателю и высокой суммы транзакции относительно истории пользователя."
 
 if __name__ == "__main__":
     # Test run
