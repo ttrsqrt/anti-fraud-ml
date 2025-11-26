@@ -1,11 +1,13 @@
 import pandas as pd
 import numpy as np
-from catboost import CatBoostClassifier, Pool
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import roc_auc_score, average_precision_score, classification_report, f1_score
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
+from sklearn.metrics import roc_auc_score, average_precision_score, classification_report, f1_score, precision_score, recall_score, fbeta_score, confusion_matrix
+from sklearn.inspection import permutation_importance
 import joblib
 import warnings
 import os
+import json
 
 warnings.filterwarnings('ignore')
 
@@ -13,13 +15,13 @@ warnings.filterwarnings('ignore')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 INPUT_FILE = os.path.join(SCRIPT_DIR, "featured_dataset.csv")
-MODEL_FILE = os.path.join(SCRIPT_DIR, "catboost_model.cbm")
+MODEL_FILE = os.path.join(SCRIPT_DIR, "lgbm_model.pkl") # Changed extension for LGBM
 
 def load_data(filepath):
     print(f"Loading data from {filepath}...")
     df = pd.read_csv(filepath)
     
-    # Ensure datetime for sorting
+    # Ensure datetime for sorting (though we use StratifiedKFold now, sorting is good practice)
     df['transdatetime'] = pd.to_datetime(df['transdatetime'])
     df = df.sort_values('transdatetime').reset_index(drop=True)
     
@@ -37,167 +39,173 @@ def train_model(df):
     X = df.drop(columns=drop_cols)
     y = df[target_col]
     
+    # Clean feature names for LightGBM (remove special chars)
+    import re
+    X.columns = [re.sub(r'[^\w]', '_', col) for col in X.columns]
+    print("Feature names cleaned.")
+    
     # Identify categorical features
     cat_features = [col for col in X.columns if X[col].dtype == 'object']
     print(f"Categorical features: {cat_features}")
     
-    # Fill NaNs
+    # LightGBM handles categorical features internally if they are 'category' type
     for col in cat_features:
-        X[col] = X[col].fillna('MISSING')
+        X[col] = X[col].astype('category')
     
-    # Time Series Split
-    tscv = TimeSeriesSplit(n_splits=5)
+    # Stratified K-Fold
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     
     fold = 1
     all_metrics = []
     
-    model = None
-    
     print(f"\n{'='*80}")
-    print("STARTING TIME SERIES CROSS-VALIDATION (5 FOLDS)")
+    print("STARTING STRATIFIED CROSS-VALIDATION (5 FOLDS)")
     print(f"{'='*80}\n")
     
-    for train_index, val_index in tscv.split(X):
+    # Placeholder for best params found in first fold
+    best_params = {}
+    
+    for train_index, val_index in skf.split(X, y):
         X_train, X_val = X.iloc[train_index], X.iloc[val_index]
         y_train, y_val = y.iloc[train_index], y.iloc[val_index]
-        
-        # Check if we have both classes in training data
-        if len(y_train.unique()) < 2:
-            print(f"Fold {fold} - Skipping: Training set has only 1 class.")
-            fold += 1
-            continue
         
         print(f"\n--- Fold {fold} ---")
         print(f"Train size: {len(X_train)}, Val size: {len(X_val)}")
         print(f"Val fraud ratio: {y_val.sum() / len(y_val) * 100:.2f}%")
             
-        # Initialize CatBoost
-        clf = CatBoostClassifier(
-            iterations=1000,
-            learning_rate=0.05,
-            depth=6,
-            eval_metric='AUC',
-            auto_class_weights='Balanced',
-            cat_features=cat_features,
-            verbose=200,
-            early_stopping_rounds=50,
-            random_seed=42
+        # Hyperparameter Tuning with RandomizedSearchCV
+        if fold == 1:
+            print("  Tuning hyperparameters (RandomizedSearchCV)...")
+            param_dist = {
+                'n_estimators': [500, 1000, 2000],
+                'learning_rate': [0.01, 0.03, 0.05, 0.1],
+                'num_leaves': [20, 31, 50, 100],
+                'max_depth': [-1, 10, 20],
+                'reg_alpha': [0, 0.1, 1, 10],
+                'reg_lambda': [0, 0.1, 1, 10],
+                'min_child_samples': [10, 20, 50],
+                'subsample': [0.7, 0.9, 1.0],
+                'colsample_bytree': [0.7, 0.9, 1.0]
+            }
+            
+            lgbm = LGBMClassifier(
+                objective='binary',
+                class_weight='balanced',
+                random_state=42,
+                verbose=-1
+            )
+            
+            random_search = RandomizedSearchCV(
+                lgbm, 
+                param_distributions=param_dist, 
+                n_iter=20, # 20 iterations
+                scoring='f1', 
+                cv=3, 
+                verbose=1, 
+                random_state=42,
+                n_jobs=-1
+            )
+            
+            random_search.fit(X_train, y_train)
+            best_params = random_search.best_params_
+            print(f"  Best Params: {best_params}")
+        
+        # Train with best params
+        clf = LGBMClassifier(
+            **best_params,
+            objective='binary',
+            class_weight='balanced',
+            random_state=42,
+            verbose=-1
         )
         
         clf.fit(
             X_train, y_train,
-            eval_set=(X_val, y_val),
-            use_best_model=True
+            eval_set=[(X_val, y_val)],
+            eval_metric='auc',
+            callbacks=[] 
         )
         
         # Predictions
         y_pred_proba = clf.predict_proba(X_val)[:, 1]
         y_pred = clf.predict(X_val)
         
-        # Calculate comprehensive metrics
-        from sklearn.metrics import (
-            precision_score, recall_score, fbeta_score, 
-            confusion_matrix, roc_auc_score, average_precision_score
-        )
-        
+        # Metrics
         metrics = {
             'fold': fold,
             'roc_auc': roc_auc_score(y_val, y_pred_proba),
             'pr_auc': average_precision_score(y_val, y_pred_proba),
             'precision': precision_score(y_val, y_pred, zero_division=0),
             'recall': recall_score(y_val, y_pred, zero_division=0),
-            'f1_score': fbeta_score(y_val, y_pred, beta=1, zero_division=0),
-            'f2_score': fbeta_score(y_val, y_pred, beta=2, zero_division=0),  # Emphasizes recall
+            'f1_score': f1_score(y_val, y_pred, zero_division=0),
+            'f2_score': fbeta_score(y_val, y_pred, beta=2, zero_division=0),
             'confusion_matrix': confusion_matrix(y_val, y_pred).tolist()
         }
         
         all_metrics.append(metrics)
         
-        # Print fold metrics
         print(f"\nFold {fold} Results:")
         print(f"  ROC-AUC:   {metrics['roc_auc']:.4f}")
         print(f"  PR-AUC:    {metrics['pr_auc']:.4f}")
         print(f"  Precision: {metrics['precision']:.4f}")
         print(f"  Recall:    {metrics['recall']:.4f}")
         print(f"  F1-Score:  {metrics['f1_score']:.4f}")
-        print(f"  F2-Score:  {metrics['f2_score']:.4f}")
         
         cm = metrics['confusion_matrix']
-        print(f"\n  Confusion Matrix:")
-        print(f"    TN: {cm[0][0]:5d} | FP: {cm[0][1]:5d}")
-        print(f"    FN: {cm[1][0]:5d} | TP: {cm[1][1]:5d}")
+        print(f"  Confusion Matrix: TN:{cm[0][0]} FP:{cm[0][1]} FN:{cm[1][0]} TP:{cm[1][1]}")
         
-        model = clf
         fold += 1
     
-    # Calculate average metrics
+    # Average Metrics
     print(f"\n{'='*80}")
-    print("AVERAGE METRICS ACROSS ALL FOLDS")
+    print("AVERAGE METRICS")
     print(f"{'='*80}\n")
     
-    avg_metrics = {
-        'roc_auc': np.mean([m['roc_auc'] for m in all_metrics]),
-        'pr_auc': np.mean([m['pr_auc'] for m in all_metrics]),
-        'precision': np.mean([m['precision'] for m in all_metrics]),
-        'recall': np.mean([m['recall'] for m in all_metrics]),
-        'f1_score': np.mean([m['f1_score'] for m in all_metrics]),
-        'f2_score': np.mean([m['f2_score'] for m in all_metrics]),
-    }
+    avg_metrics = {k: np.mean([m[k] for m in all_metrics]) for k in all_metrics[0] if k != 'fold' and k != 'confusion_matrix'}
+    for k, v in avg_metrics.items():
+        print(f"{k.upper():15s}: {v:.4f}")
+        
+    # Feature Importance (Permutation)
+    print("\nCalculating Permutation Importance (on last validation fold)...")
+    perm_importance = permutation_importance(clf, X_val, y_val, n_repeats=10, random_state=42, n_jobs=-1)
     
-    for metric, value in avg_metrics.items():
-        print(f"{metric.upper():15s}: {value:.4f}")
+    sorted_idx = perm_importance.importances_mean.argsort()
     
-    # Save detailed metrics to JSON
-    import json
+    print("\nTop 10 Features by Permutation Importance:")
+    top_features = []
+    for i in sorted_idx[-10:]:
+        print(f"{X.columns[i]}: {perm_importance.importances_mean[i]:.4f}")
+        top_features.append(X.columns[i])
+        
+    # Save metrics
     metrics_file = os.path.join(SCRIPT_DIR, "model_metrics.json")
     with open(metrics_file, 'w') as f:
         json.dump({
             'fold_metrics': all_metrics,
-            'average_metrics': avg_metrics
+            'average_metrics': avg_metrics,
+            'top_features': top_features
         }, f, indent=2)
-    print(f"\nDetailed metrics saved to: {metrics_file}")
-    
-    # Final training on ALL data
-    print("\n" + "="*80)
-    print("RETRAINING ON FULL DATASET FOR PRODUCTION MODEL")
-    print("="*80 + "\n")
-    
-    final_model = CatBoostClassifier(
-        iterations=1000,
-        learning_rate=0.05,
-        depth=6,
-        eval_metric='AUC',
-        auto_class_weights='Balanced',
-        cat_features=cat_features,
-        verbose=200,
-        random_seed=42
+        
+    # Retrain on full data
+    print("\nRetraining on full dataset...")
+    final_model = LGBMClassifier(
+        **best_params,
+        objective='binary',
+        class_weight='balanced',
+        random_state=42,
+        verbose=-1
     )
     final_model.fit(X, y)
     
-    return final_model, X.columns.tolist(), all_metrics
+    return final_model
 
 def main():
     df = load_data(INPUT_FILE)
-    
-    model, feature_names, all_metrics = train_model(df)
+    model = train_model(df)
     
     print(f"\nSaving model to {MODEL_FILE}...")
-    model.save_model(MODEL_FILE)
-    
-    # Save feature importance
-    importance = model.get_feature_importance()
-    feat_imp = pd.DataFrame({'feature': feature_names, 'importance': importance})
-    feat_imp = feat_imp.sort_values('importance', ascending=False)
-    
-    print("\nTop 10 Important Features:")
-    print(feat_imp.head(10).to_string(index=False))
-    
-    print("\n" + "="*80)
-    print("TRAINING COMPLETED SUCCESSFULLY!")
-    print("="*80)
-    print(f"\nModel saved to: {MODEL_FILE}")
-    print(f"Metrics saved to: {os.path.join(SCRIPT_DIR, 'model_metrics.json')}")
-    print("\nDone!")
+    joblib.dump(model, MODEL_FILE)
+    print("Done!")
 
 if __name__ == "__main__":
     main()

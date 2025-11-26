@@ -30,10 +30,10 @@ def create_transactional_features(df):
     df['transdatetime'] = pd.to_datetime(df['transdatetime'], errors='coerce')
     
     # Remove rows with invalid datetime (crucial for rolling window)
-    initial_len = len(df)
-    df = df.dropna(subset=['transdatetime'])
-    if len(df) < initial_len:
-        print(f"  Warning: Dropped {initial_len - len(df)} rows with invalid 'transdatetime'")
+    # initial_len = len(df)
+    # df = df.dropna(subset=['transdatetime'])
+    # if len(df) < initial_len:
+    #     print(f"  Warning: Dropped {initial_len - len(df)} rows with invalid 'transdatetime'")
         
     # Ensure cst_dim_id is string and handle NaNs
     df['cst_dim_id'] = df['cst_dim_id'].fillna('UNKNOWN').astype(str)
@@ -76,6 +76,26 @@ def create_transactional_features(df):
     # 4. Count transactions in last hour
     print("  - Calculating transaction counts (1h)...")
     df = assign_rolling_feature(df, '1H', 'count', 'trans_count_1h')
+    
+    # 5. Velocity Features (Amount / Time since last)
+    # Avoid division by zero
+    print("  - Calculating velocity features...")
+    df['velocity_amount_per_sec'] = df['amount'] / (df['time_since_last_trans'] + 1)
+    
+    # 6. Ratio Features
+    print("  - Calculating ratio features...")
+    df['ratio_amount_mean_1d'] = df['amount'] / (df['amount_mean_1d'] + 1)
+    df['ratio_amount_mean_7d'] = df['amount'] / (df['amount_mean_7d'] + 1)
+    df['ratio_amount_mean_30d'] = df['amount'] / (df['amount_mean_30d'] + 1)
+    
+    # 7. Cyclic Time Features
+    print("  - Calculating cyclic time features...")
+    # Hour (0-23)
+    df['hour_sin'] = np.sin(2 * np.pi * df['transdatetime'].dt.hour / 24)
+    df['hour_cos'] = np.cos(2 * np.pi * df['transdatetime'].dt.hour / 24)
+    # Day of week (0-6)
+    df['day_of_week_sin'] = np.sin(2 * np.pi * df['transdatetime'].dt.dayofweek / 7)
+    df['day_of_week_cos'] = np.cos(2 * np.pi * df['transdatetime'].dt.dayofweek / 7)
     
     return df
 
@@ -143,7 +163,8 @@ def main():
     # Print new features
     new_cols = ['time_since_last_trans', 'amount_mean_1d', 'amount_mean_7d', 'amount_mean_30d', 
                 'amount_zscore_30d', 'trans_count_1h', 'device_changed', 'os_changed', 
-                'unique_senders_to_receiver', 'unique_receivers_from_sender']
+                'unique_senders_to_receiver', 'unique_receivers_from_sender',
+                'velocity_amount_per_sec', 'ratio_amount_mean_30d', 'hour_sin', 'hour_cos']
     
     print("\nSample of new features:")
     print(df[new_cols].head().to_string())
