@@ -3,7 +3,10 @@ import shutil
 from datetime import datetime
 import json
 import pandas as pd
-from catboost import CatBoostClassifier
+import numpy as np
+from lightgbm import LGBMClassifier
+import joblib
+import re
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
 import warnings
@@ -17,7 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = SCRIPT_DIR
 MODELS_DIR = os.path.join(DATA_DIR, "models")
 FEATURED_DATASET = os.path.join(DATA_DIR, "featured_dataset.csv")
-PRODUCTION_MODEL = os.path.join(DATA_DIR, "catboost_model.cbm")
+PRODUCTION_MODEL = os.path.join(DATA_DIR, "lgbm_model.pkl")
 
 # Model versioning
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -55,7 +58,7 @@ class ModelRetrainer:
     def train_new_model(self, df):
         """Train a new model version"""
         print(f"\n{'='*80}")
-        print("TRAINING NEW MODEL VERSION")
+        print("TRAINING NEW MODEL VERSION (LightGBM)")
         print(f"{'='*80}\n")
         
         # Prepare data
@@ -63,9 +66,13 @@ class ModelRetrainer:
         X = df.drop(columns=drop_cols)
         y = df['target']
         
+        # Clean feature names for LightGBM
+        X.columns = [re.sub(r'[^\w]', '_', col) for col in X.columns]
+        
+        # Handle categorical features
         cat_features = [col for col in X.columns if X[col].dtype == 'object']
         for col in cat_features:
-            X[col] = X[col].fillna('MISSING')
+            X[col] = X[col].astype('category')
         
         # Quick validation with TimeSeriesSplit (1 fold for speed)
         tscv = TimeSeriesSplit(n_splits=2)
@@ -75,18 +82,22 @@ class ModelRetrainer:
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
         # Train model
-        model = CatBoostClassifier(
-            iterations=500,  # Reduced for faster retraining
+        model = LGBMClassifier(
+            n_estimators=1000,
             learning_rate=0.05,
-            depth=6,
-            eval_metric='AUC',
-            auto_class_weights='Balanced',
-            cat_features=cat_features,
-            verbose=100,
-            random_seed=42
+            num_leaves=31,
+            objective='binary',
+            class_weight='balanced',
+            random_state=42,
+            verbose=-1
         )
         
-        model.fit(X_train, y_train, eval_set=(X_val, y_val), use_best_model=True)
+        model.fit(
+            X_train, y_train, 
+            eval_set=[(X_val, y_val)], 
+            eval_metric='auc',
+            callbacks=[]
+        )
         
         # Evaluate
         y_pred_proba = model.predict_proba(X_val)[:, 1]
@@ -105,29 +116,70 @@ class ModelRetrainer:
         
         # Retrain on full dataset
         print("\nRetraining on full dataset...")
-        final_model = CatBoostClassifier(
-            iterations=500,
+        final_model = LGBMClassifier(
+            n_estimators=1000,
             learning_rate=0.05,
-            depth=6,
-            eval_metric='AUC',
-            auto_class_weights='Balanced',
-            cat_features=cat_features,
-            verbose=False,
-            random_seed=42
+            num_leaves=31,
+            objective='binary',
+            class_weight='balanced',
+            random_state=42,
+            verbose=-1
         )
         final_model.fit(X, y)
         
         return final_model, metrics
     
+    def cleanup_old_versions(self, keep_last_n=5):
+        """Delete old model versions to save space"""
+        print(f"\n[CLEANUP] Checking for old versions (keeping last {keep_last_n})...")
+        
+        versions = self.version_log["versions"]
+        if len(versions) <= keep_last_n:
+            print("   No cleanup needed.")
+            return
+
+        # Sort by timestamp (just in case, though they should be ordered)
+        # Assuming format matches, otherwise rely on list order
+        
+        # Versions to delete
+        to_delete = versions[:-keep_last_n]
+        to_keep = versions[-keep_last_n:]
+        
+        deleted_count = 0
+        for v in to_delete:
+            path = v["model_path"]
+            version_id = v["version"]
+            
+            # Don't delete if it's the current version (safety check)
+            if version_id == self.version_log["current_version"]:
+                print(f"   Skipping deletion of {version_id} (Current Version)")
+                to_keep.insert(0, v) # Keep it
+                continue
+                
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"   Deleted {version_id}: {path}")
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"   Error deleting {path}: {e}")
+            else:
+                print(f"   File not found (already deleted?): {path}")
+        
+        # Update log
+        self.version_log["versions"] = to_keep
+        self.save_version_log()
+        print(f"   Cleanup complete. Removed {deleted_count} old versions.")
+
     def save_model_version(self, model, metrics, notes=""):
         """Save new model version with metadata"""
         version = self.get_next_version()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Save model file
-        model_filename = f"catboost_model_{version}.cbm"
+        model_filename = f"lgbm_model_{version}.pkl"
         model_path = os.path.join(self.models_dir, model_filename)
-        model.save_model(model_path)
+        joblib.dump(model, model_path)
         
         # Add to version log
         version_info = {
@@ -146,10 +198,13 @@ class ModelRetrainer:
         print(f"   Path: {model_path}")
         print(f"   Timestamp: {timestamp}")
         
+        # Trigger cleanup
+        self.cleanup_old_versions()
+        
         return version, model_path
     
     def promote_to_production(self, version=None):
-        """Promote a model version to production (replace catboost_model.cbm)"""
+        """Promote a model version to production (replace lgbm_model.pkl)"""
         if version is None:
             version = self.version_log["current_version"]
         
@@ -165,9 +220,10 @@ class ModelRetrainer:
         
         # Backup current production model
         if os.path.exists(PRODUCTION_MODEL):
-            backup_path = os.path.join(self.models_dir, f"production_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.cbm")
+            backup_path = os.path.join(self.models_dir, f"production_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl")
             shutil.copy(PRODUCTION_MODEL, backup_path)
             print(f"[BACKUP] Backed up current production model to: {backup_path}")
+            
         
         # Copy new version to production
         shutil.copy(version_info["model_path"], PRODUCTION_MODEL)
@@ -191,7 +247,7 @@ class ModelRetrainer:
         model, metrics = self.train_new_model(df)
         
         # Save version
-        notes = f"Automated retraining on {len(df)} samples"
+        notes = f"Automated retraining on {len(df)} samples (LGBM)"
         version, model_path = self.save_model_version(model, metrics, notes)
         
         # Auto-deploy to production
@@ -199,7 +255,15 @@ class ModelRetrainer:
             # Check if new model is better than current
             current_version = self.version_log.get("current_version")
             if len(self.version_log["versions"]) > 1:
+                # Compare with the previous version in the log (which is now the second to last, since we just appended)
+                # Wait, we just appended the new one. So we compare with [-2].
                 prev_metrics = self.version_log["versions"][-2]["metrics"]
+                
+                # Simple check: is new ROC-AUC >= old ROC-AUC?
+                # Note: This logic assumes the previous version in the log was the "best" or "production" one.
+                # In a real system, we might compare against the specifically flagged production version.
+                # But for this MVP, sequential comparison is okay.
+                
                 if metrics['roc_auc'] >= prev_metrics['roc_auc']:
                     print(f"\n[OK] New model is better or equal (ROC-AUC: {metrics['roc_auc']:.4f} >= {prev_metrics['roc_auc']:.4f})")
                     self.promote_to_production(version)

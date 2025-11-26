@@ -49,6 +49,25 @@ class FraudExplainer:
         # row_data: pandas Series or dict of feature values
         # shap_values: numpy array of shap values for this row
         
+        # Friendly names mapping
+        FEATURE_FRIENDLY_NAMES = {
+            'amount': 'Сумма транзакции',
+            'direction_frequency': 'Популярность получателя (кол-во переводов)',
+            'os_frequency': 'Популярность версии ОС (кол-во клиентов)',
+            'var_login_interval_30d': 'Вариативность интервалов входа (дисперсия)',
+            'amount_mean_30d': 'Средняя сумма за 30 дней',
+            'amount_mean_7d': 'Средняя сумма за 7 дней',
+            'time_since_last_trans': 'Время с последней транзакции (сек)',
+            'unique_receivers_from_sender': 'Количество уникальных получателей',
+            'device_changed': 'Смена устройства',
+            'os_changed': 'Смена ОС',
+            'monthly_os_changes': 'Количество смен ОС за месяц',
+            'day_of_week_cos': 'День недели (циклический)',
+            'hour_cos': 'Час суток (циклический)',
+            'logins_7d_over_30d_ratio': 'Активность (7 дней / 30 дней)',
+            'avg_login_interval_30d': 'Средний интервал входа (сек)'
+        }
+
         # Create a DataFrame of features and their impact
         impact = pd.DataFrame({
             'feature': feature_names,
@@ -73,13 +92,37 @@ class FraudExplainer:
             val = row['value']
             shap_val = row['shap_value']
             
+            # Get friendly name
+            friendly_name = FEATURE_FRIENDLY_NAMES.get(feat, feat)
+            
+            # Format value for readability
+            if isinstance(val, (int, float)):
+                if abs(val) > 1000000:
+                    # For huge numbers like variance, use scientific notation or simplified text
+                    if 'var_login' in feat:
+                        # Convert variance to std dev in hours for readability
+                        import math
+                        try:
+                            std_hours = math.sqrt(val) / 3600
+                            val_str = f"{val:.2e} (StdDev: ~{std_hours:.1f} часов)"
+                        except:
+                            val_str = f"{val:.2e}"
+                    else:
+                        val_str = f"{val:.2e}"
+                elif isinstance(val, float):
+                    val_str = f"{val:.2f}"
+                else:
+                    val_str = str(val)
+            else:
+                val_str = str(val)
+
             # Simple rule-based text generation (Mock LLM)
             if shap_val > 0:
-                direction = "increases risk"
+                direction = "повышает риск"
             else:
-                direction = "decreases risk"
+                direction = "снижает риск"
                 
-            reasons.append(f"- {feat} (value: {val}) {direction} (impact: {shap_val:.2f})")
+            reasons.append(f"- {friendly_name} (значение: {val_str}) {direction} (влияние: {shap_val:.2f})")
             
         explanation += "\n".join(reasons)
         
