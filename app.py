@@ -63,9 +63,15 @@ def predict_fraud(transaction: dict):
         # Convert input to DataFrame
         df = pd.DataFrame([transaction])
         
-        # Ensure correct column order/presence (CatBoost is sensitive to column order if not using Pool with feature names, 
-        # but we used a dataframe for training so it should map by name if we are careful, 
-        # or we just pass the dict if CatBoost supports it. Safest is DataFrame with correct columns.)
+        # Clean feature names to match training (remove special chars)
+        import re
+        df.columns = [re.sub(r'[^\w]', '_', col) for col in df.columns]
+        
+        # Ensure categorical columns are category type
+        cat_features = ['last_phone_model', 'last_os'] # Add other cat features if any
+        for col in cat_features:
+            if col in df.columns:
+                df[col] = df[col].astype('category')
         
         # Get prediction
         prob = explainer.model.predict_proba(df)[0][1]
@@ -73,10 +79,34 @@ def predict_fraud(transaction: dict):
         
         # Get explanation
         shap_values = explainer.get_shap_values(df)
-        # shap_values is (1, n_features)
+        
+        # Handle SHAP output variations (List for multiclass/some binary, Array for others)
+        import numpy as np
+        if isinstance(shap_values, list):
+            # For binary classification, we usually want the positive class (index 1)
+            # If only 1 output, take index 0
+            if len(shap_values) > 1:
+                sv = shap_values[1]
+            else:
+                sv = shap_values[0]
+        else:
+            sv = shap_values
+            
+        # sv is now likely (n_samples, n_features)
+        # We take the first sample
+        sv = sv[0]
+        
+        # Ensure it is 1D array
+        sv = np.array(sv).flatten()
         
         feature_names = df.columns.tolist()
-        explanation = explainer.generate_explanation(df.iloc[0], shap_values[0], feature_names)
+        
+        # Ensure feature_names and sv have same length
+        # SHAP sometimes adds a bias column? Usually not in shap_values() unless requested.
+        # But if lengths differ, we truncate or pad? 
+        # Better to just pass what we have and let generate_explanation handle or error with more info.
+        
+        explanation = explainer.generate_explanation(df.iloc[0], sv, feature_names)
         
         return {
             "fraud_probability": float(prob),

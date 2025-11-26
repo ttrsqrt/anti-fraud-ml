@@ -11,13 +11,13 @@ warnings.filterwarnings('ignore')
 # Получаем директорию текущего скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-MODEL_FILE = os.path.join(SCRIPT_DIR, "catboost_model.cbm")
+MODEL_FILE = os.path.join(SCRIPT_DIR, "lgbm_model.pkl")
 
 class FraudExplainer:
     def __init__(self, model_path=MODEL_FILE):
         print(f"Loading model from {model_path}...")
-        self.model = CatBoostClassifier()
-        self.model.load_model(model_path)
+        # Load LightGBM model using joblib
+        self.model = joblib.load(model_path)
         self.explainer = shap.TreeExplainer(self.model)
         
     def get_shap_values(self, X):
