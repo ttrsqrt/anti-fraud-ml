@@ -148,7 +148,7 @@ class FraudExplainer:
         shap_values = self.explainer.shap_values(X)
         return shap_values
 
-    def generate_explanation(self, row_data, shap_values, feature_names, is_fraud=True):
+    def generate_explanation(self, row_data, shap_values, feature_names, is_fraud=True, enable_llm=True):
         # Generate a text explanation based on top SHAP features
         # row_data: pandas Series or dict of feature values
         # shap_values: numpy array of shap values for this row
@@ -224,7 +224,14 @@ class FraudExplainer:
             explanation += f"- {friendly_name}: {val_str} ({direction})\n"
         
         # Real LLM call (with fallback to mock if API unavailable)
-        llm_summary = self._llm_generate(reasons, is_fraud)
+        # ONLY call if enabled AND is_fraud (to save costs/time)
+        if enable_llm and is_fraud:
+            llm_summary = self._llm_generate(reasons, is_fraud)
+        else:
+            if not is_fraud:
+                llm_summary = "Транзакция выглядит безопасной. Сумма и получатель соответствуют вашим обычным паттернам активности."
+            else:
+                llm_summary = "LLM объяснение отключено. См. факторы риска выше."
         
         return {
             'text_explanation': explanation,

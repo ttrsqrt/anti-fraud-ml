@@ -16,6 +16,9 @@ st.sidebar.header("Настройки")
 # Optimal threshold found during training was 0.50
 threshold = st.sidebar.slider("Порог блокировки (Threshold)", 0.0, 1.0, 0.5, 0.01)
 
+# LLM Toggle
+enable_llm = st.sidebar.checkbox("Включить LLM объяснения (OpenAI)", value=True, help="Если выключено, будут показаны только стандартные шаблоны объяснений.")
+
 # Input method
 input_method = st.sidebar.radio("Метод ввода данных", ["Ручной ввод", "Загрузить пример из датасета"])
 
@@ -127,6 +130,9 @@ if (input_method == "Загрузить пример из датасета" and 
         try:
             # Handle potential NaN in input_data (JSON doesn't like NaN)
             clean_data = {k: (v if pd.notna(v) else 0) for k, v in input_data.items()}
+            
+            # Add LLM flag
+            clean_data['enable_llm'] = enable_llm
             
             response = requests.post(API_URL, json=clean_data)
             

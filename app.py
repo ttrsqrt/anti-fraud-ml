@@ -5,7 +5,18 @@ import uvicorn
 from explainability import FraudExplainer
 import joblib
 
-app = FastAPI(title="Fraud Detection API")
+app = FastAPI(
+    title="Fraud Detection API",
+    description="API for detecting fraudulent transactions using LightGBM and SHAP.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+@app.get("/")
+def read_root():
+    return {"message": "Fraud Detection API is running. Go to /docs for documentation."}
+
 
 # Load resources
 try:
@@ -53,6 +64,7 @@ class TransactionInput(BaseModel):
     # Let's check the feature list from training.
     # Based on feature_engineering.py, we have many features.
     # We should probably make the input model dynamic or cover the top features.
+    enable_llm: bool = True # Default to True if not provided
 
 @app.post("/predict")
 def predict_fraud(transaction: dict):
@@ -60,6 +72,9 @@ def predict_fraud(transaction: dict):
         raise HTTPException(status_code=500, detail="Model not loaded")
     
     try:
+        # Extract enable_llm flag (not a model feature)
+        enable_llm = transaction.pop('enable_llm', True)
+        
         # Convert input to DataFrame
         df = pd.DataFrame([transaction])
         
@@ -106,7 +121,7 @@ def predict_fraud(transaction: dict):
         # But if lengths differ, we truncate or pad? 
         # Better to just pass what we have and let generate_explanation handle or error with more info.
         
-        explanation = explainer.generate_explanation(df.iloc[0], sv, feature_names, is_fraud=bool(prediction))
+        explanation = explainer.generate_explanation(df.iloc[0], sv, feature_names, is_fraud=bool(prediction), enable_llm=enable_llm)
         
         return {
             "fraud_probability": float(prob),
